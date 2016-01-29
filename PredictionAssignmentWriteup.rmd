@@ -1,0 +1,138 @@
+---
+output: html_document
+---
+#Pratical Machine Learning: Prediction Assignment Writeup
+
+###Author name: TK Thong
+### Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks.
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this data set, the participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+The goal of this project is to predict the manner of performing unilateral dumbbell biceps curls based on data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. The prediction response is the "classe" variable in the training set. Five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.
+
+###Load data
+We load the data set 
+```{r, warning=FALSE, message=FALSE}
+if (!file.exists("pml-training.csv")){
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+                  "pml-training.csv")
+}
+if (!file.exists("pml-testing.csv")){
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+                  "pml-testing.csv")
+}
+trainingRawData = read.csv("pml-training.csv", na.strings = c("NA", ""))
+dim(trainingRawData)
+
+testingRawData = read.csv("pml-testing.csv", na.strings=c("", "NA", "NULL"))
+dim(testingRawData)
+```
+The raw dataset contained 160 variables and 19622 rows of data. The test data has 20 rows of data.
+
+##Preprocess
+First perform preprocess to remove NA and reduce predictor.
+Variables not related to movement sensors will be removed.  
+Many variables contained missing data are to be removed from the dataset. 
+Belt, arm, dumbbell, and forearm variables that do not have any missing values in the raw dataset will be predictor variables.
+Finally, subset the raw dataset to include only the needed predictor variables and the classe outcome variable.
+
+```{r}
+set.seed(111)
+trainingRawData$classe <- as.factor(trainingRawData$classe)  
+isNA <- sapply(trainingRawData, function (x) any(is.na(x) | x == ""))
+predictor <- !isNA & grepl("belt|[^(fore)]arm|dumbbell|forearm", names(isNA))
+predictVar <- names(isNA)[predictor]
+allVariables <- c(predictVar, "classe")
+trainingRawData <- trainingRawData[, allVariables]
+dim(trainingRawData)
+names(trainingRawData)
+```
+Final dataset have 53 variables
+ 
+###Split Data
+Split the raw dataset into a 60% training and 40% testing dataset for cross validation.
+
+```{r, warning=FALSE, message=FALSE}
+library(caret)
+inTrain = createDataPartition(y=trainingRawData$classe, p=0.6, list=FALSE)
+trainData = trainingRawData[inTrain, ]
+testData = trainingRawData[-inTrain, ]
+dim(trainData)
+dim(testData)
+```
+11776 samples and 53 variables for training, 7846 samples and 46 variables for testing.
+
+### Centering and scaling
+Perform centering and scaling for all three data set.
+```{r}
+preObj <- preProcess(trainData[, predictVar], method=c("center", "scale"))
+preObj
+predTemp <- predict(preObj, trainData[, predictVar])
+trainDataCS <- data.frame(classe = trainData$classe, predTemp)
+
+predTemp <- predict(preObj, testData[, predictVar])
+testDataCS <- data.frame(classe = testData$classe, predTemp)
+
+testDataset <- predict(preObj, testingRawData[, predictVar])
+```
+
+##Analysis
+Choose two models to predict the classe variable based on the remaining predictor variables, then use confusionMatrix to compare the accuracy and get the out of sample error. 
+
+###Decision Tree
+First choose the rpart tree to generate models, then plot the smooth decision tree, after that run the model with testing data and finally check the accuracy and out of sample error using confusionMatrix. 
+
+```{r, warning=FALSE, message=FALSE}
+library(rattle)      
+library(rpart.plot)   
+
+modFit <- train(classe ~ ., method = "rpart", data = trainDataCS)
+print(modFit$finalModel)
+
+fancyRpartPlot(modFit$finalModel)
+##Evaluate on test data
+prediction <- predict(modFit, testDataCS)
+confusionMatrix(prediction, testDataCS$classe)
+cmrf<-confusionMatrix(prediction, testDataCS$classe)
+```
+Based on the accuracy results from the confusion matrix on the testing data, the Decision Tree's accuracy is `r round(cmrf$overall['Accuracy'], 4) * 100`%, 
+The Out of sample error is `r (1 - round(cmrf$overall['Accuracy'], 4)) * 100`%.
+
+###Random forest
+Choose the Random Forest to generate models, after that run the model with testing data and finally check the accuracy and out of sample error using confusionMatrix.
+```{r, warning=FALSE, message=FALSE}
+library(randomForest)
+
+#below caret train function is extremely slow, change to randomForest()
+#modFit <- train(classe ~ ., method = "rf", data = trainDataCS)
+modFit <- randomForest(classe ~ ., data = trainDataCS)
+
+modFit
+# Evaluate the Random Forest model on the test dataset
+prediction <- predict(modFit, testDataCS)
+
+confusionMatrix(prediction, testDataCS$classe)
+cmrf <- confusionMatrix(prediction, testDataCS$classe)
+```
+
+Random Forest run on the Testing data has accuracy `r round(cmrf$overall['Accuracy'], 4) * 100`%.
+The Out of sample error is `r (1 - round(cmrf$overall['Accuracy'], 4)) * 100`%.
+
+###Variable Important
+Below plot can see which variables have higher impact on the prediction based on the Random Forest model.
+```{r}
+varImpPlot(modFit)
+```
+
+##Conclusion
+
+Random Forest is more accurate than Decision Tree.
+
+Now run the Random Forest model to the testing data set.
+```{r, warning=FALSE, message=FALSE}
+predictionclasse <- predict(modFit, testDataset)
+predictionclasse
+```
+The answers are submitted to course's quiz for automated grading and all the answers are correct. 
+
